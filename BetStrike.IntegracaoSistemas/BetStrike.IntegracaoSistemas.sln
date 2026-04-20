@@ -1,13 +1,15 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.37012.4 d17.14
+VisualStudioVersion = 17.14.37012.4
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BetStrike.DataGenerator", "BetStrike.DataGenerator\BetStrike.DataGenerator.csproj", "{95DE6CD4-D8A4-427E-B4B4-A4F782760F87}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BetStrike.Results.Api", "BetStrike.Results.Api\BetStrike.Results.Api.csproj", "{6D787704-0F2B-40F0-8028-B7FE304EC842}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BetStrike.Bets.Api", "BetStrike.Bets.Api\BetStrike.Bets.Api.csproj", "{A7731772-84D7-4320-991C-27687EB6B4BB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BetStrike.ConsoleApp", "BetStrike.ConsoleApp\BetStrike.ConsoleApp.csproj", "{3BA48B3C-B1BA-473D-B4C1-DD95FD2B2B1A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -27,6 +29,10 @@ Global
 		{A7731772-84D7-4320-991C-27687EB6B4BB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A7731772-84D7-4320-991C-27687EB6B4BB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A7731772-84D7-4320-991C-27687EB6B4BB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3BA48B3C-B1BA-473D-B4C1-DD95FD2B2B1A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3BA48B3C-B1BA-473D-B4C1-DD95FD2B2B1A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3BA48B3C-B1BA-473D-B4C1-DD95FD2B2B1A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3BA48B3C-B1BA-473D-B4C1-DD95FD2B2B1A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

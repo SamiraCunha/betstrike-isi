@@ -1,15 +1,31 @@
+
+using BetStrike.Bets.Api.Data;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// Configuração (appsettings + secrets, se quiseres)
+if (builder.Environment.IsDevelopment())
+{
+    builder.Configuration.AddUserSecrets<Program>();
+}
+
+builder.Configuration.AddEnvironmentVariables();
+
+// Ler a connection string
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+// Registar o DbConnectionFactory, injetando IConfiguration ou a própria string
+builder.Services.AddSingleton<DbConnectionFactory>();
+
+// se o teu DbConnectionFactory receber IConfiguration no construtor,
+// o ASP.NET Core passa o builder.Configuration automaticamente.
 
 builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -17,9 +33,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
 app.UseAuthorization();
-
 app.MapControllers();
-
 app.Run();
