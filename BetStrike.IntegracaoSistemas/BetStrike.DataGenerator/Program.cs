@@ -13,6 +13,16 @@ namespace BetStrike.DataGenerator
     internal class Program
     {
 
+        public class JogoResponse
+        {
+            public string Codigo_Jogo { get; set; }
+            public DateTime Data_Jogo { get; set; }
+            public TimeSpan Hora_Inicio { get; set; }
+            public string Equipa_Casa { get; set; }
+            public string Equipa_Fora { get; set; }
+            public int Estado { get; set; }
+        }
+
         class SimulacaoJogo
         {
             public string Codigo { get; set; }
@@ -24,91 +34,73 @@ namespace BetStrike.DataGenerator
         }
         static async Task Main(string[] args)
         {
-            var equipas = new List<string>
-            {
-                "FC Porto",
-                "SL Benfica",
-                "Sporting CP",
-                "SC Braga",
-                "Vitória SC",
-                "Boavista",
-                "Gil Vicente",
-                "Famalicão",
-                "Rio Ave",
-                "Estoril",
-                "Portimonense",
-                "Casa Pia",
-                "Farense",
-                "Moreirense",
-                "Arouca",
-                "Vizela",
-                "Chaves",
-                "Estrela da Amadora"
-            };
-
-       
-
-            List<(string casa, string fora)> GerarEmparelhamentosJornada(Random rnd, List<string> todasEquipas)
-            {
-                // Copiar e baralhar lista
-                var equipasBaralhadas = todasEquipas.OrderBy(_ => rnd.Next()).ToList();
-
-                var jogos = new List<(string casa, string fora)>();
-
-                for (int i = 0; i < 9; i++)
-                {
-                    var equipaCasa = equipasBaralhadas[2 * i];
-                    var equipaFora = equipasBaralhadas[2 * i + 1];
-
-                    jogos.Add((equipaCasa, equipaFora));
-                }
-
-                return jogos;
-            }
-
-
-
-            string GerarCodigoJogo(int anoParam, int numeroJornadaParam, int numeroJogo)
-            {
-                var anoStr = anoParam.ToString("0000");
-                var jornadaStr = numeroJornadaParam.ToString("00");
-                var jogoStr = numeroJogo.ToString("00");
-                return $"FUT-{anoStr}-{jornadaStr}{jogoStr}";
-            }
-
-            // ------------------------
-            // FASE 1: PUBLICAÇÃO DO CALENDÁRIO
-            // ------------------------
-
             var httpClient = new HttpClient
             {
-                BaseAddress = new Uri("https://localhost:7286") // AJUSTA para a URL da tua API de Resultados
+                BaseAddress = new Uri("https://localhost:7286") // API Resultados
+            };
+
+            while (true)
+            {
+                Console.Clear();
+                Console.WriteLine("=== BetStrike DataGenerator ===\n");
+                Console.WriteLine("1) Publicar calendário (criar jogos agendados)");
+                Console.WriteLine("2) Simular jogos existentes (em curso/finalizar)");
+                Console.WriteLine("0) Sair\n");
+                Console.Write("Escolha uma opção: ");
+                var opcao = Console.ReadLine();
+
+                switch (opcao)
+                {
+                    case "1":
+                        await PublicarCalendarioAsync(httpClient);
+                        break;
+                    case "2":
+                        await SimularTodosJogosAsync(httpClient);
+                        break;
+                    case "0":
+                        return;
+                    default:
+                        Console.WriteLine("Opção inválida.");
+                        break;
+                }
+
+                Console.WriteLine("\nENTER para voltar ao menu...");
+                Console.ReadLine();
+            }
+        }
+        static async Task PublicarCalendarioAsync(HttpClient httpClient)
+        {
+            var equipas = new List<string>
+            {
+                "FC Porto", "SL Benfica", "Sporting CP", "SC Braga",
+                "Vitória SC", "Boavista", "Gil Vicente", "Famalicão",
+                "Rio Ave", "Estoril", "Portimonense", "Casa Pia",
+                "Farense", "Moreirense", "Arouca", "Vizela",
+                "Chaves", "Estrela da Amadora"
             };
 
             var random = new Random();
-
             int ano = DateTime.Now.Year;
             int numeroJornada = 1;
-
-            // Definir uma data base para a jornada
             var dataJornada = new DateTime(ano, 9, 15);
-            var horaBase = new TimeSpan(20, 0, 0); // 20:00
-            var jogosSimulados = new List<SimulacaoJogo>();
-            var emparelhamentos = GerarEmparelhamentosJornada(random, equipas);
+            var horaBase = new TimeSpan(20, 0, 0);
+
+            // Baralhar e emparelhar — cada equipa aparece exatamente uma vez
+            var emparelhamentos = GerarEmparelhamentos(random, equipas);
+
+            Console.WriteLine($"\nA publicar calendário — Jornada {numeroJornada} ({dataJornada:dd/MM/yyyy})\n");
 
             for (int i = 0; i < emparelhamentos.Count; i++)
             {
                 var (casa, fora) = emparelhamentos[i];
-
-                var codigo = GerarCodigoJogo(ano, numeroJornada, i + 1);
-
-                
+                var codigo = GerarCodigo(ano, numeroJornada, i + 1);
+                var hora = horaBase.Add(TimeSpan.FromMinutes(15 * i));
 
                 var request = new CriarJogoRequest
                 {
                     Codigo_Jogo = codigo,
                     Data_Jogo = dataJornada,
-                    Hora_Inicio = horaBase.Add(TimeSpan.FromMinutes(15 * i)), // jogos espaçados de 15 min, por exemplo
+                    Hora_Inicio = hora,
                     Equipa_Casa = casa,
                     Equipa_Fora = fora,
                     Golos_Casa = 0,
@@ -116,78 +108,128 @@ namespace BetStrike.DataGenerator
                     Estado = 1 // Agendado
                 };
 
-                Console.WriteLine($"A criar jogo {codigo}: {casa} vs {fora}");
+                Console.Write($"  A criar {codigo}: {casa} vs {fora} ... ");
 
                 var response = await httpClient.PostAsJsonAsync("/api/jogos", request);
 
-                if (!response.IsSuccessStatusCode)
-                {
-                    var body = await response.Content.ReadAsStringAsync();
-                    Console.WriteLine($"Falha ao criar jogo {codigo}. Status: {response.StatusCode}. Corpo: {body}");
-                }
+                if (response.IsSuccessStatusCode)
+                    Console.WriteLine("OK");
                 else
                 {
-                    Console.WriteLine($"Jogo {codigo} criado com sucesso.");
-
-                    jogosSimulados.Add(new SimulacaoJogo
-                    {
-                        Codigo = codigo,
-                        EquipaCasa = casa,
-                        EquipaFora = fora,
-                        GolosCasa = 0, // Simular golos entre 0 e 4
-                        GolosFora = 0,
-                        Estado = 1 // Agendado
-                    });
+                    var body = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"ERRO {(int)response.StatusCode}: {body}");
                 }
             }
 
-            Console.WriteLine("Publicação do calendário concluída.");
-
-            Console.WriteLine("Iniciando simulação dos jogos (Fase 2)...");
-
-            var tarefas = jogosSimulados.Select(jogo => SimularJogoAsync(httpClient, jogo));
-
-            await Task.WhenAll(tarefas);
-
-            Console.WriteLine("Simulação concluída.");
-
+            Console.WriteLine("\nCalendário publicado. Todos os jogos estão no estado Agendado (1).");
         }
 
+        // ────────────────────────────────────────────────────────────────────────
+        // FASE 2 — Simular todos os jogos agendados em paralelo
+        // ────────────────────────────────────────────────────────────────────────
+
+        static async Task SimularTodosJogosAsync(HttpClient httpClient)
+        {
+            // Vai buscar à API os jogos no estado Agendado (1)
+            Console.WriteLine("\nA obter jogos agendados da API...");
+
+            List<JogoResponse> jogos;
+
+            try
+            {
+                // Tenta usar o filtro por estado; se a API não suportar query string,
+                // obtém todos e filtra localmente
+                // Vai buscar TODOS os jogos (sem filtro)
+                var resposta = await httpClient.GetAsync("/api/jogos");
+
+                if (!resposta.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"Erro ao obter jogos: {resposta.StatusCode}");
+                    return;
+                }
+
+                jogos = await resposta.Content.ReadFromJsonAsync<List<JogoResponse>>();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exceção ao obter jogos: {ex.Message}");
+                return;
+            }
+
+            // Filtrar localmente para garantir apenas Agendados
+            jogos = jogos?.Where(j => j.Estado == 1).ToList();
+
+            if (jogos == null || jogos.Count == 0)
+            {
+                Console.WriteLine("Não há jogos agendados para simular. Publique o calendário primeiro (opção 1).");
+                return;
+            }
+
+            Console.WriteLine($"\nEncontrados {jogos.Count} jogo(s) agendados. A iniciar simulação em paralelo...\n");
+
+            // Converter para SimulacaoJogo
+            var simulacoes = jogos.Select(j => new SimulacaoJogo
+            {
+                Codigo = j.Codigo_Jogo,
+                EquipaCasa = j.Equipa_Casa,
+                EquipaFora = j.Equipa_Fora,
+                GolosCasa = 0,
+                GolosFora = 0,
+                Estado = 1
+            }).ToList();
+
+            // Correr TODOS os jogos em paralelo — Task.WhenAll
+            var tarefas = simulacoes.Select(jogo => SimularJogoAsync(httpClient, jogo));
+            await Task.WhenAll(tarefas);
+
+            Console.WriteLine("\nTodos os jogos foram finalizados.");
+        }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // Simulação de um jogo individual
+        // ────────────────────────────────────────────────────────────────────────
 
         static async Task SimularJogoAsync(HttpClient httpClient, SimulacaoJogo jogo)
         {
-            // 1) Passar de Agendado (1) para Em Curso (2)
+            // Transitar para Em Curso (2)
             await AtualizarJogoAsync(httpClient, jogo, novoEstado: 2);
-            Console.WriteLine($"Jogo {jogo.Codigo} entrou em curso.");
+            Log(jogo.Codigo, $"Em Curso — {jogo.EquipaCasa} vs {jogo.EquipaFora}");
 
-            // Vamos simular 9 intervalos de 10 segundos (90 minutos fictícios)
-            var random = new Random();
+            // Cada iteração representa 10 minutos de jogo (9 × 10 = 90 min)
+            // Probabilidade de golo por intervalo: ~25% por equipa → média ~4.5 total,
+            // ajustado para ~20% → média ~3.6; use 15% por equipa → ~2.7 por jogo
+            var random = new Random(Guid.NewGuid().GetHashCode()); // seed único por jogo
 
-            for (int i = 0; i < 9; i++)
+            for (int minuto = 10; minuto <= 90; minuto += 10)
             {
-                await Task.Delay(TimeSpan.FromSeconds(10)); // 10s = 10 minutos fictícios
+                await Task.Delay(TimeSpan.FromSeconds(10));
 
-                // Geração de golos aleatória (prob média 2-3 golos por jogo)
-                // Exemplo simples: em cada intervalo, pequena probabilidade de golo
-                if (random.NextDouble() < 0.3) // 30% de chance de sair golo neste intervalo
+                // Verificar golo equipa da casa (~15% por intervalo)
+                if (random.NextDouble() < 0.15)
                 {
-                    bool goloCasa = random.NextDouble() < 0.5;
-
-                    if (goloCasa)
-                        jogo.GolosCasa++;
-                    else
-                        jogo.GolosFora++;
-
-                    Console.WriteLine($"Jogo {jogo.Codigo}: Golo! {jogo.EquipaCasa} {jogo.GolosCasa} - {jogo.GolosFora} {jogo.EquipaFora}");
+                    jogo.GolosCasa++;
+                    Log(jogo.Codigo, $"GOLO! {jogo.EquipaCasa} — {jogo.GolosCasa}-{jogo.GolosFora} (min {minuto})");
                 }
 
+                // Verificar golo equipa de fora (~15% por intervalo)
+                if (random.NextDouble() < 0.15)
+                {
+                    jogo.GolosFora++;
+                    Log(jogo.Codigo, $"GOLO! {jogo.EquipaFora} — {jogo.GolosCasa}-{jogo.GolosFora} (min {minuto})");
+                }
+
+                // Atualizar marcador na API (mantém estado Em Curso)
                 await AtualizarJogoAsync(httpClient, jogo, novoEstado: 2);
             }
 
-            // 3) Finalizar jogo
+            // Transitar para Finalizado (3)
             await AtualizarJogoAsync(httpClient, jogo, novoEstado: 3);
-            Console.WriteLine($"Jogo {jogo.Codigo} finalizado: {jogo.EquipaCasa} {jogo.GolosCasa} - {jogo.GolosFora} {jogo.EquipaFora}");
+            Log(jogo.Codigo, $"FINALIZADO — {jogo.EquipaCasa} {jogo.GolosCasa}-{jogo.GolosFora} {jogo.EquipaFora}");
         }
+
+        // ────────────────────────────────────────────────────────────────────────
+        // Atualizar jogo na API
+        // ────────────────────────────────────────────────────────────────────────
 
         static async Task AtualizarJogoAsync(HttpClient httpClient, SimulacaoJogo jogo, int novoEstado)
         {
@@ -198,19 +240,57 @@ namespace BetStrike.DataGenerator
                 Estado = novoEstado
             };
 
-            var response = await httpClient.PutAsJsonAsync($"/api/jogos/{jogo.Codigo}", request);
+            try
+            {
+                var response = await httpClient.PutAsJsonAsync($"/api/jogos/{jogo.Codigo}", request);
 
-            if (!response.IsSuccessStatusCode)
-            {
-                var body = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"Falha ao atualizar jogo {jogo.Codigo}. Status: {response.StatusCode}. Corpo: {body}");
+                if (response.IsSuccessStatusCode)
+                    jogo.Estado = novoEstado;
+                else
+                {
+                    var body = await response.Content.ReadAsStringAsync();
+                    Log(jogo.Codigo, $"ERRO ao atualizar para estado {novoEstado}: {response.StatusCode} — {body}");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                jogo.Estado = novoEstado;
+                Log(jogo.Codigo, $"Exceção ao atualizar: {ex.Message}");
             }
         }
 
+        // ────────────────────────────────────────────────────────────────────────
+        // Utilitários
+        // ────────────────────────────────────────────────────────────────────────
 
+        static List<(string casa, string fora)> GerarEmparelhamentos(Random rnd, List<string> equipas)
+        {
+            // Baralhar a lista — garante cada equipa exatamente uma vez (9 jogos de 18 equipas)
+            var baralha = equipas.OrderBy(_ => rnd.Next()).ToList();
+            var jogos = new List<(string, string)>();
+
+            for (int i = 0; i < baralha.Count / 2; i++)
+                jogos.Add((baralha[2 * i], baralha[2 * i + 1]));
+
+            return jogos;
+        }
+
+        static string GerarCodigo(int ano, int jornada, int numeroJogo) =>
+            $"FUT-{ano:0000}-{jornada:00}{numeroJogo:00}";
+
+        // Log thread-safe com lock para não misturar linhas entre jogos paralelos
+        static readonly object _logLock = new object();
+        static void Log(string codigo, string mensagem)
+        {
+            lock (_logLock)
+            {
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [{codigo}] {mensagem}");
+            }
+        }
     }
+
+
+
+
+
+ 
 }
