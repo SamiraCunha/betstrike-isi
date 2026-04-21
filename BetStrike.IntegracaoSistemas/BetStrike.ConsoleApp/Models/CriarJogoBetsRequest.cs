@@ -1,0 +1,18 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace BetStrike.ConsoleApp.Models
+{
+    public class CriarJogoBetsRequest
+    {
+        public string Codigo_Jogo { get; set; }
+        public DateTime DataHora_Inicio { get; set; }
+        public string Equipa_Casa { get; set; }
+        public string Equipa_Fora { get; set; }
+        public string Tipo_Competicao { get; set; }
+        public int Estado { get; set; }
+    }
+}

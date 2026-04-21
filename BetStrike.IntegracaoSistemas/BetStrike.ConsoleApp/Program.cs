@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
@@ -57,7 +58,7 @@ namespace BetStrike.ConsoleApp
                         await MenuResultadosAsync(httpResultados);
                         break;
                     case "3":
-                        await MenuApostasAsync(httpApostas);
+                        await MenuApostasAsync(httpApostas, httpResultados);
                         break;
                     case "0":
                         return;
@@ -128,7 +129,7 @@ namespace BetStrike.ConsoleApp
         }
 
         // ------------- Plataforma Apostas (API) -------------
-        static async Task MenuApostasAsync(HttpClient httpApostas)
+        static async Task MenuApostasAsync(HttpClient httpApostas, HttpClient httpResultados)
         {
             while (true)
             {
@@ -137,6 +138,8 @@ namespace BetStrike.ConsoleApp
                 Console.WriteLine("1) Listar jogos disponíveis");
                 Console.WriteLine("2) Criar aposta");
                 Console.WriteLine("3) Ver apostas de um utilizador");
+                Console.WriteLine("4) Sincronizar resultado + resolver apostas de um jogo");
+                Console.WriteLine("5) Sincronizar jogos da Results para Bets");
                 Console.WriteLine("0) Voltar");
                 Console.Write("Escolha: ");
 
@@ -153,6 +156,12 @@ namespace BetStrike.ConsoleApp
                     case "3":
                         await VerApostasUtilizadorAsync(httpApostas);
                         break;
+                    case "4":
+                        await SincronizarEResolverJogoAsync(httpApostas);
+                        break;
+                    case "5":
+                        await SincronizarJogosResultadosParaBetsAsync(httpResultados, httpApostas);
+                        break;
                     case "0":
                         return;
                     default:
@@ -162,6 +171,108 @@ namespace BetStrike.ConsoleApp
 
                 Console.WriteLine("ENTER para continuar...");
                 Console.ReadLine();
+            }
+        }
+
+        static async Task SincronizarJogosResultadosParaBetsAsync(HttpClient httpResultados, HttpClient httpApostas)
+        {
+            Console.Clear();
+            Console.WriteLine("=== Sincronizar jogos da Plataforma de Resultados para Apostas ===\n");
+
+            try
+            {
+                // Lê todos os jogos da Results.Api
+                var jogosResults = await httpResultados
+                    .GetFromJsonAsync<List<JogosResultados>>("api/jogos"); // ajusta se tua rota for diferente
+
+                if (jogosResults == null || jogosResults.Count == 0)
+                {
+                    Console.WriteLine("Nenhum jogo encontrado na Plataforma de Resultados.");
+                    return;
+                }
+
+                int inseridos = 0;
+                int jaExistiam = 0;
+                int erros = 0;
+
+                foreach (var jogo in jogosResults)
+                {
+                    var request = new CriarJogoBetsRequest
+                    {
+                        Codigo_Jogo = jogo.Codigo_Jogo,
+                        DataHora_Inicio = jogo.Data_Jogo.Date + jogo.Hora_Inicio,
+                        Equipa_Casa = jogo.Equipa_Casa,
+                        Equipa_Fora = jogo.Equipa_Fora,
+                        Tipo_Competicao = "Primeira Liga",
+                        Estado = jogo.Estado
+                    };
+
+                    var response = await httpApostas.PostAsJsonAsync("api/jogos", request);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        inseridos++;
+                    }
+                    else
+                    {
+                        var body = await response.Content.ReadAsStringAsync();
+                        if (body != null && body.IndexOf("Já existe um jogo com esse Codigo_Jogo", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            jaExistiam++;
+                        }
+                        else
+                        {
+                            erros++;
+                            Console.WriteLine($"Erro ao sincronizar jogo {jogo.Codigo_Jogo}: {body}");
+                        }
+                    }
+                }
+
+                Console.WriteLine($"\nSincronização concluída:");
+                Console.WriteLine($"  Inseridos novos: {inseridos}");
+                Console.WriteLine($"  Já existiam:     {jaExistiam}");
+                Console.WriteLine($"  Erros:           {erros}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Erro ao sincronizar jogos: " + ex.Message);
+            }
+        }
+
+        static async Task SincronizarEResolverJogoAsync(HttpClient httpApostas)
+        {
+            Console.Clear();
+            Console.WriteLine("=== Sincronizar resultado e resolver apostas ===\n");
+
+            Console.Write("Código do jogo (ex: FUT-2026-0101): ");
+            var codigo = Console.ReadLine();
+
+            if (string.IsNullOrWhiteSpace(codigo))
+            {
+                Console.WriteLine("Código inválido.");
+                return;
+            }
+
+            try
+            {
+                var url = $"api/jogos/sincronizar-e-resolver/{codigo}";
+                var response = await httpApostas.PostAsync(url, content: null);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"Falha ao sincronizar/resolver. Status: {response.StatusCode}");
+                    var bodyError = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine(bodyError);
+                    return;
+                }
+
+                var bodyOk = await response.Content.ReadAsStringAsync();
+                Console.WriteLine("Operação concluída com sucesso:");
+                Console.WriteLine(bodyOk);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Erro ao chamar API de Apostas: " + ex.Message);
             }
         }
 

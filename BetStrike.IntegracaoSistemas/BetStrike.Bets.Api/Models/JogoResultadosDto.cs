@@ -1,14 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace BetStrike.ConsoleApp.Models
+﻿namespace BetStrike.Bets.Api.Models
 {
-    public class JogosResultados
+    public class JogoResultadosDto
     {
-
         public int Id { get; set; }
         public string Codigo_Jogo { get; set; }
         public DateTime Data_Jogo { get; set; }
@@ -17,7 +10,9 @@ namespace BetStrike.ConsoleApp.Models
         public string Equipa_Fora { get; set; }
         public int Golos_Casa { get; set; }
         public int Golos_Fora { get; set; }
-        public int Estado { get; set; } // 1 Agendado, 2 Em Curso, 3 Finalizado
-   
+        public int Estado
+        {
+            get; set;
+        }
     }
 }

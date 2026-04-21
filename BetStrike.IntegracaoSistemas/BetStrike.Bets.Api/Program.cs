@@ -16,6 +16,10 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 
 // Registar o DbConnectionFactory, injetando IConfiguration ou a própria string
 builder.Services.AddSingleton<DbConnectionFactory>();
+builder.Services.AddHttpClient("ResultadosApi", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["ApiUrls:Resultados"]);
+});
 
 // se o teu DbConnectionFactory receber IConfiguration no construtor,
 // o ASP.NET Core passa o builder.Configuration automaticamente.

@@ -1,8 +1,9 @@
-﻿using System.Data;
-using BetStrike.Bets.Api.Data;
+﻿using BetStrike.Bets.Api.Data;
 using BetStrike.Bets.Api.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using System.Data;
+using System.Net.Http;
 
 namespace BetStrike.Bets.Api.Controllers
 {
@@ -11,10 +12,89 @@ namespace BetStrike.Bets.Api.Controllers
     public class JogosController : ControllerBase
     {
         private readonly DbConnectionFactory _connectionFactory;
+        private readonly IHttpClientFactory _httpClientFactory;
 
-        public JogosController(DbConnectionFactory connectionFactory)
+        public JogosController(DbConnectionFactory connectionFactory, IHttpClientFactory httpClientFactory)
         {
             _connectionFactory = connectionFactory;
+            _httpClientFactory = httpClientFactory;
+        }
+
+        // POST api/jogos/sincronizar-resultado/{codigoJogo}
+        [HttpPost("sincronizar-e-resolver/{codigoJogo}")]
+        public async Task<IActionResult> SincronizarResultado(string codigoJogo)
+        {
+            // Usa o client nomeado configurado no Program.cs
+            var resultadosClient = _httpClientFactory.CreateClient("ResultadosApi");
+
+            // Agora pode usar rota relativa porque BaseAddress está definida
+            var jogoResultados = await resultadosClient
+                .GetFromJsonAsync<JogoResultadosDto>($"api/jogos/{codigoJogo}");
+            if (jogoResultados == null)
+                return NotFound($"Jogo {codigoJogo} não encontrado na Plataforma de Resultados.");
+
+            if (jogoResultados.Estado != 3)
+                return BadRequest("Só é permitido sincronizar resultado de jogos finalizados (Estado = 3).");
+
+            using var connection = _connectionFactory.CreateConnection();
+            connection.Open();
+            using var transaction = connection.BeginTransaction();
+
+            try
+            {
+                // 2) Garantir que jogo na Bets está como Finalizado (3)
+                using (var cmdEstado = connection.CreateCommand())
+                {
+                    cmdEstado.Transaction = transaction;
+                    cmdEstado.CommandText = "spAtualizarEstadoJogo";
+                    cmdEstado.CommandType = CommandType.StoredProcedure;
+                    cmdEstado.Parameters.Add(new SqlParameter("@Codigo_Jogo", codigoJogo));
+                    cmdEstado.Parameters.Add(new SqlParameter("@NovoEstado", 3));
+                    cmdEstado.ExecuteNonQuery();
+                }
+
+                // 3) Inserir resultado na tabela Resultado
+                using (var cmdResultado = connection.CreateCommand())
+                {
+                    cmdResultado.Transaction = transaction;
+                    cmdResultado.CommandText = "spInserirResultado";
+                    cmdResultado.CommandType = CommandType.StoredProcedure;
+                    cmdResultado.Parameters.Add(new SqlParameter("@Codigo_Jogo", codigoJogo));
+                    cmdResultado.Parameters.Add(new SqlParameter("@Golos_Casa", jogoResultados.Golos_Casa));
+                    cmdResultado.Parameters.Add(new SqlParameter("@Golos_Fora", jogoResultados.Golos_Fora));
+                    cmdResultado.ExecuteNonQuery();
+                }
+
+                // 4) Resolver apostas com base no resultado
+                using (var cmdResolver = connection.CreateCommand())
+                {
+                    cmdResolver.Transaction = transaction;
+                    cmdResolver.CommandText = "spResolverApostasDoJogo";
+                    cmdResolver.CommandType = CommandType.StoredProcedure;
+                    cmdResolver.Parameters.Add(new SqlParameter("@Codigo_Jogo", codigoJogo));
+                    cmdResolver.ExecuteNonQuery();
+                }
+
+                transaction.Commit();
+
+                return Ok(new
+                {
+                    Codigo_Jogo = codigoJogo,
+                    jogoResultados.Golos_Casa,
+                    jogoResultados.Golos_Fora,
+                    Mensagem = "Resultado sincronizado e apostas resolvidas com sucesso."
+                });
+            }
+            catch (SqlException ex)
+            {
+                transaction.Rollback();
+                return BadRequest(ex.Message);
+            }
+            catch (Exception)
+            {
+                transaction.Rollback();
+                return StatusCode(500, "Erro interno ao sincronizar resultado e resolver apostas.");
+            }
         }
 
         // POST api/jogos
