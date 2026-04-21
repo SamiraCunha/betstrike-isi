@@ -33,28 +33,62 @@ namespace BetStrike.Bets.Api.Controllers
             using var connection = _connectionFactory.CreateConnection();
             connection.Open();
 
-            using var command = connection.CreateCommand();
-            command.CommandText = "spInserirAposta";
-            command.CommandType = CommandType.StoredProcedure;
-
-            command.Parameters.Add(new SqlParameter("@Codigo_Jogo", request.Codigo_Jogo));
-            command.Parameters.Add(new SqlParameter("@UtilizadorId", request.UtilizadorId));
-            command.Parameters.Add(new SqlParameter("@Tipo_Aposta", request.Tipo_Aposta));
-            command.Parameters.Add(new SqlParameter("@Montante", request.Montante));
-            command.Parameters.Add(new SqlParameter("@Odd_Momento", request.Odd_Momento));
+            // Agora vamos usar uma transação, porque vamos mexer em Apostas e Pagamentos
+            using var transaction = connection.BeginTransaction();
 
             try
             {
-                var result = command.ExecuteScalar();
-                var novaApostaId = Convert.ToInt32(result);
+                int novaApostaId;
+
+                // 1) Inserir aposta na BD Apostas
+                using (var command = connection.CreateCommand())
+                {
+                    command.Transaction = transaction;
+                    command.CommandText = "spInserirAposta";
+                    command.CommandType = CommandType.StoredProcedure;
+
+                    command.Parameters.Add(new SqlParameter("@Codigo_Jogo", request.Codigo_Jogo));
+                    command.Parameters.Add(new SqlParameter("@UtilizadorId", request.UtilizadorId));
+                    command.Parameters.Add(new SqlParameter("@Tipo_Aposta", request.Tipo_Aposta));
+                    command.Parameters.Add(new SqlParameter("@Montante", request.Montante));
+                    command.Parameters.Add(new SqlParameter("@Odd_Momento", request.Odd_Momento));
+
+                    // Se a tua SP já devolve o Id por SELECT SCOPE_IDENTITY(),
+                    // podes continuar a usar ExecuteScalar. Se devolve por OUTPUT, adapta.
+                    var result = command.ExecuteScalar();
+                    novaApostaId = Convert.ToInt32(result);
+                }
+
+                // 2) Debitar saldo na BD Pagamentos
+                using (var cmdPag = connection.CreateCommand())
+                {
+                    cmdPag.Transaction = transaction;
+                    cmdPag.CommandText = "Pagamentos.dbo.spDebitarAposta";
+                    cmdPag.CommandType = CommandType.StoredProcedure;
+                    cmdPag.Parameters.Add(new SqlParameter("@ApostaId", novaApostaId));
+                    cmdPag.Parameters.Add(new SqlParameter("@UtilizadorId", request.UtilizadorId));
+                    cmdPag.Parameters.Add(new SqlParameter("@Valor", request.Montante));
+
+                    cmdPag.ExecuteNonQuery();
+                }
+
+                // Se chegarmos aqui, correu tudo bem -> commit
+                transaction.Commit();
 
                 return CreatedAtAction(nameof(ObterApostaPorId),
                     new { id = novaApostaId },
-                    new { Id = novaApostaId });
+                    new { Id = novaApostaId, Mensagem = "Aposta criada e saldo debitado." });
             }
             catch (SqlException ex)
             {
+                // Se falhar ou a SP de Pagamentos lançar 'Saldo insuficiente', fazemos rollback
+                transaction.Rollback();
                 return BadRequest(ex.Message);
+            }
+            catch (Exception)
+            {
+                transaction.Rollback();
+                return StatusCode(500, "Erro ao criar aposta.");
             }
         }
 
