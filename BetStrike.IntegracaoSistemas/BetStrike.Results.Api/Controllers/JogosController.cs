@@ -247,9 +247,10 @@ namespace BetStrike.Results.Api.Controllers
             };
         }
 
+      
         // DELETE api/jogos/{codigo}
         [HttpDelete("{codigo}")]
-        public IActionResult RemoverJogo(String codigo)
+        public IActionResult RemoverJogo(string codigo)
         {
             using var connection = _connectionFactory.CreateConnection();
             connection.Open();
@@ -257,9 +258,9 @@ namespace BetStrike.Results.Api.Controllers
             // 1) Buscar estado atual
             using var selectCmd = connection.CreateCommand();
             selectCmd.CommandText = @"
-                                    SELECT Id, Estado
-                                    FROM Jogos
-                                    WHERE Codigo_Jogo = @Codigo_Jogo;";
+        SELECT Id, Estado
+        FROM Jogos
+        WHERE Codigo_Jogo = @Codigo_Jogo;";
             selectCmd.Parameters.Add(new SqlParameter("@Codigo_Jogo", codigo));
 
             using var reader = selectCmd.ExecuteReader();
@@ -271,17 +272,21 @@ namespace BetStrike.Results.Api.Controllers
 
             reader.Close();
 
-            if (estadoAtual != 1) // Só pode remover se estiver Agendado (estado=1)
-                return BadRequest("Só é permitido remover jogos no estado Agendado");
+            // Só deixar cancelar se ainda não tiver estado final
+            if (estadoAtual is 3 or 4 or 5)
+                return BadRequest("Só é possível cancelar jogos que não estejam Finalizados, Cancelados ou Adiados.");
 
-            // 2) Remover o jogo
-            using var deleteCmd = connection.CreateCommand();
-            deleteCmd.CommandText = "DELETE FROM Jogos WHERE Id = @Id;";
-            deleteCmd.Parameters.Add(new SqlParameter("@Id", id));
+            // 2) Em vez de apagar, marcar como Cancelado (4)
+            using var updateCmd = connection.CreateCommand();
+            updateCmd.CommandText = @"
+        UPDATE Jogos
+        SET Estado = 4
+        WHERE Id = @Id;";
+            updateCmd.Parameters.Add(new SqlParameter("@Id", id));
 
-            var linhas = deleteCmd.ExecuteNonQuery();
+            var linhas = updateCmd.ExecuteNonQuery();
             if (linhas == 0)
-                return StatusCode(500, "Falha ao remover o jogo.");
+                return StatusCode(500, "Falha ao cancelar o jogo.");
 
             return NoContent(); // 204
         }

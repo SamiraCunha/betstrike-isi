@@ -87,7 +87,7 @@ namespace BetStrike.ConsoleApp
 
             var startInfo = new ProcessStartInfo
             {
-                FileName = "BetStrike.DataGenerator.exe", // ajusta para o nome/caminho real
+                FileName = "\"C:\\Users\\Admin\\source\\repos\\betstrike-isi\\BetStrike.IntegracaoSistemas\\BetStrike.DataGenerator\\bin\\Debug\\BetStrike.DataGenerator.exe\"", // ajusta para o nome/caminho real
                 UseShellExecute = true                    // abre numa nova janela de consola
             };
 

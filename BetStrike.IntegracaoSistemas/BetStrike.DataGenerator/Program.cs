@@ -70,6 +70,14 @@ namespace BetStrike.DataGenerator
         }
         static async Task PublicarCalendarioAsync(HttpClient httpClient)
         {
+            Console.Write("\nNúmero da jornada (ex: 1, 2, 3): ");
+            var input = Console.ReadLine();
+            if (!int.TryParse(input, out int numeroJornada) || numeroJornada <= 0)
+            {
+                Console.WriteLine("Número de jornada inválido.");
+                return;
+            }
+
             var equipas = new List<string>
             {
                 "FC Porto", "SL Benfica", "Sporting CP", "SC Braga",
@@ -81,8 +89,7 @@ namespace BetStrike.DataGenerator
 
             var random = new Random();
             int ano = DateTime.Now.Year;
-            int numeroJornada = 1;
-            var dataJornada = new DateTime(ano, 9, 15);
+            var dataJornada = new DateTime(ano, 9, 15).AddDays((numeroJornada - 1) * 7); // por ex: 1 semana entre jornadas
             var horaBase = new TimeSpan(20, 0, 0);
 
             // Baralhar e emparelhar — cada equipa aparece exatamente uma vez
@@ -188,44 +195,68 @@ namespace BetStrike.DataGenerator
         // ────────────────────────────────────────────────────────────────────────
         // Simulação de um jogo individual
         // ────────────────────────────────────────────────────────────────────────
-
         static async Task SimularJogoAsync(HttpClient httpClient, SimulacaoJogo jogo)
         {
-            // Transitar para Em Curso (2)
+            var random = new Random(Guid.NewGuid().GetHashCode()); // seed único por jogo
+
+            // ── Decidir destino do jogo antes de começar ─────────────────────────────
+            // 85% Finalizado | 8% Cancelado | 7% Adiado
+            double sorteio = random.NextDouble();
+            int estadoFinal;
+            string descricaoFinal;
+
+            if (sorteio < 0.08)
+            {
+                // Cancelado — não chega a entrar Em Curso
+                estadoFinal = 4;
+                descricaoFinal = "CANCELADO";
+                await AtualizarJogoAsync(httpClient, jogo, novoEstado: 4);
+                Log(jogo.Codigo, $"CANCELADO — {jogo.EquipaCasa} vs {jogo.EquipaFora} (antes de começar)");
+                return; // não simula nada
+            }
+            else if (sorteio < 0.15)
+            {
+                // Adiado — não chega a entrar Em Curso
+                estadoFinal = 5;
+                descricaoFinal = "ADIADO";
+                await AtualizarJogoAsync(httpClient, jogo, novoEstado: 5);
+                Log(jogo.Codigo, $"ADIADO — {jogo.EquipaCasa} vs {jogo.EquipaFora} (antes de começar)");
+                return; // não simula nada
+            }
+            else
+            {
+                estadoFinal = 3;
+                descricaoFinal = "FINALIZADO";
+            }
+
+            // ── Jogo segue para simulação normal (85% dos casos) ─────────────────────
+
             await AtualizarJogoAsync(httpClient, jogo, novoEstado: 2);
             Log(jogo.Codigo, $"Em Curso — {jogo.EquipaCasa} vs {jogo.EquipaFora}");
-
-            // Cada iteração representa 10 minutos de jogo (9 × 10 = 90 min)
-            // Probabilidade de golo por intervalo: ~25% por equipa → média ~4.5 total,
-            // ajustado para ~20% → média ~3.6; use 15% por equipa → ~2.7 por jogo
-            var random = new Random(Guid.NewGuid().GetHashCode()); // seed único por jogo
 
             for (int minuto = 10; minuto <= 90; minuto += 10)
             {
                 await Task.Delay(TimeSpan.FromSeconds(10));
 
-                // Verificar golo equipa da casa (~15% por intervalo)
                 if (random.NextDouble() < 0.15)
                 {
                     jogo.GolosCasa++;
                     Log(jogo.Codigo, $"GOLO! {jogo.EquipaCasa} — {jogo.GolosCasa}-{jogo.GolosFora} (min {minuto})");
                 }
 
-                // Verificar golo equipa de fora (~15% por intervalo)
                 if (random.NextDouble() < 0.15)
                 {
                     jogo.GolosFora++;
                     Log(jogo.Codigo, $"GOLO! {jogo.EquipaFora} — {jogo.GolosCasa}-{jogo.GolosFora} (min {minuto})");
                 }
 
-                // Atualizar marcador na API (mantém estado Em Curso)
                 await AtualizarJogoAsync(httpClient, jogo, novoEstado: 2);
             }
 
-            // Transitar para Finalizado (3)
             await AtualizarJogoAsync(httpClient, jogo, novoEstado: 3);
             Log(jogo.Codigo, $"FINALIZADO — {jogo.EquipaCasa} {jogo.GolosCasa}-{jogo.GolosFora} {jogo.EquipaFora}");
         }
+        
 
         // ────────────────────────────────────────────────────────────────────────
         // Atualizar jogo na API

@@ -22,19 +22,31 @@ namespace BetStrike.Bets.Api.Controllers
 
         // POST api/jogos/sincronizar-resultado/{codigoJogo}
         [HttpPost("sincronizar-e-resolver/{codigoJogo}")]
-        public async Task<IActionResult> SincronizarResultado(string codigoJogo)
+        public async Task<IActionResult> SincronizarEResolver(string codigoJogo)
         {
-            // Usa o client nomeado configurado no Program.cs
-            var resultadosClient = _httpClientFactory.CreateClient("ResultadosApi");
+            // 1) Buscar dados do jogo na Plataforma de Resultados
+            var client = _httpClientFactory.CreateClient("ResultadosApi");
 
-            // Agora pode usar rota relativa porque BaseAddress está definida
-            var jogoResultados = await resultadosClient
-                .GetFromJsonAsync<JogoResultadosDto>($"api/jogos/{codigoJogo}");
-            if (jogoResultados == null)
-                return NotFound($"Jogo {codigoJogo} não encontrado na Plataforma de Resultados.");
+            JogoResultadosDto jogoResultados;
+            try
+            {
+                jogoResultados = await client
+                    .GetFromJsonAsync<JogoResultadosDto>($"api/jogos/{codigoJogo}");
 
-            if (jogoResultados.Estado != 3)
-                return BadRequest("Só é permitido sincronizar resultado de jogos finalizados (Estado = 3).");
+                if (jogoResultados == null)
+                    return NotFound($"Jogo {codigoJogo} não encontrado na Plataforma de Resultados.");
+            }
+            catch (HttpRequestException ex)
+            {
+                return StatusCode(502, $"Erro ao contactar Plataforma de Resultados: {ex.Message}");
+            }
+
+            // 2) Validar estado vindo da Results.Api (aceitar 3, 4, 5)
+            if (jogoResultados.Estado is not (3 or 4 or 5))
+            {
+                return BadRequest(
+                    "Só é possível sincronizar e resolver apostas para jogos em estado Finalizado (3), Cancelado (4) ou Adiado (5).");
+            }
 
             using var connection = _connectionFactory.CreateConnection();
             connection.Open();
@@ -42,30 +54,33 @@ namespace BetStrike.Bets.Api.Controllers
 
             try
             {
-                // 2) Garantir que jogo na Bets está como Finalizado (3)
+                // 3) Atualizar estado do jogo na BD Apostas
                 using (var cmdEstado = connection.CreateCommand())
                 {
                     cmdEstado.Transaction = transaction;
                     cmdEstado.CommandText = "spAtualizarEstadoJogo";
                     cmdEstado.CommandType = CommandType.StoredProcedure;
                     cmdEstado.Parameters.Add(new SqlParameter("@Codigo_Jogo", codigoJogo));
-                    cmdEstado.Parameters.Add(new SqlParameter("@NovoEstado", 3));
+                    cmdEstado.Parameters.Add(new SqlParameter("@NovoEstado", jogoResultados.Estado));
                     cmdEstado.ExecuteNonQuery();
                 }
 
-                // 3) Inserir resultado na tabela Resultado
-                using (var cmdResultado = connection.CreateCommand())
+                // 4) Se jogo estiver Finalizado (3), garantir Resultado
+                if (jogoResultados.Estado == 3)
                 {
-                    cmdResultado.Transaction = transaction;
-                    cmdResultado.CommandText = "spInserirResultado";
-                    cmdResultado.CommandType = CommandType.StoredProcedure;
-                    cmdResultado.Parameters.Add(new SqlParameter("@Codigo_Jogo", codigoJogo));
-                    cmdResultado.Parameters.Add(new SqlParameter("@Golos_Casa", jogoResultados.Golos_Casa));
-                    cmdResultado.Parameters.Add(new SqlParameter("@Golos_Fora", jogoResultados.Golos_Fora));
-                    cmdResultado.ExecuteNonQuery();
+                    using (var cmdResultado = connection.CreateCommand())
+                    {
+                        cmdResultado.Transaction = transaction;
+                        cmdResultado.CommandText = "spInserirResultado";
+                        cmdResultado.CommandType = CommandType.StoredProcedure;
+                        cmdResultado.Parameters.Add(new SqlParameter("@Codigo_Jogo", codigoJogo));
+                        cmdResultado.Parameters.Add(new SqlParameter("@Golos_Casa", jogoResultados.Golos_Casa));
+                        cmdResultado.Parameters.Add(new SqlParameter("@Golos_Fora", jogoResultados.Golos_Fora));
+                        cmdResultado.ExecuteNonQuery();
+                    }
                 }
 
-                // 4) Resolver apostas com base no resultado
+                // 5) Resolver apostas (sp já trata diferentemente 3 vs 4/5)
                 using (var cmdResolver = connection.CreateCommand())
                 {
                     cmdResolver.Transaction = transaction;
@@ -80,9 +95,16 @@ namespace BetStrike.Bets.Api.Controllers
                 return Ok(new
                 {
                     Codigo_Jogo = codigoJogo,
+                    Estado_Resultados = jogoResultados.Estado,
                     jogoResultados.Golos_Casa,
                     jogoResultados.Golos_Fora,
-                    Mensagem = "Resultado sincronizado e apostas resolvidas com sucesso."
+                    Mensagem = jogoResultados.Estado switch
+                    {
+                        3 => "Jogo finalizado: resultado sincronizado e apostas resolvidas.",
+                        4 => "Jogo cancelado: apostas pendentes anuladas e reembolsadas.",
+                        5 => "Jogo adiado: apostas pendentes anuladas e reembolsadas.",
+                        _ => "Operação concluída."
+                    }
                 });
             }
             catch (SqlException ex)
@@ -90,7 +112,7 @@ namespace BetStrike.Bets.Api.Controllers
                 transaction.Rollback();
                 return BadRequest(ex.Message);
             }
-            catch (Exception)
+            catch
             {
                 transaction.Rollback();
                 return StatusCode(500, "Erro interno ao sincronizar resultado e resolver apostas.");
@@ -254,6 +276,8 @@ namespace BetStrike.Bets.Api.Controllers
             // 3) Devolver o jogo atualizado (reutilizando o GET por código)
             return ObterJogoPorCodigo(codigo);
         }
+
+       
 
     }
 }
