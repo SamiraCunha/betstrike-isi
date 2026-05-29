@@ -1,8 +1,9 @@
-﻿using System.Data;
-using BetStrike.Bets.Api.Data;
+﻿using BetStrike.Bets.Api.Data;
 using BetStrike.Bets.Api.Models;
+using BetStrike.Bets.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using System.Data;
 
 namespace BetStrike.Bets.Api.Controllers
 {
@@ -33,12 +34,13 @@ namespace BetStrike.Bets.Api.Controllers
             using var connection = _connectionFactory.CreateConnection();
             connection.Open();
 
-            // Agora vamos usar uma transação, porque vamos mexer em Apostas e Pagamentos
             using var transaction = connection.BeginTransaction();
 
             try
             {
                 int novaApostaId;
+                int jogoId = 0;
+                string tipoAposta = request.Tipo_Aposta;
 
                 // 1) Inserir aposta na BD Apostas
                 using (var command = connection.CreateCommand())
@@ -53,10 +55,17 @@ namespace BetStrike.Bets.Api.Controllers
                     command.Parameters.Add(new SqlParameter("@Montante", request.Montante));
                     command.Parameters.Add(new SqlParameter("@Odd_Momento", request.Odd_Momento));
 
-                    // Se a tua SP já devolve o Id por SELECT SCOPE_IDENTITY(),
-                    // podes continuar a usar ExecuteScalar. Se devolve por OUTPUT, adapta.
                     var result = command.ExecuteScalar();
                     novaApostaId = Convert.ToInt32(result);
+                }
+
+                // Buscar JogoId para enviar ao RabbitMQ
+                using (var cmdJogo = connection.CreateCommand())
+                {
+                    cmdJogo.Transaction = transaction;
+                    cmdJogo.CommandText = "SELECT JogoId FROM Aposta WHERE Id = @Id";
+                    cmdJogo.Parameters.Add(new SqlParameter("@Id", novaApostaId));
+                    jogoId = Convert.ToInt32(cmdJogo.ExecuteScalar());
                 }
 
                 // 2) Debitar saldo na BD Pagamentos
@@ -72,8 +81,23 @@ namespace BetStrike.Bets.Api.Controllers
                     cmdPag.ExecuteNonQuery();
                 }
 
-                // Se chegarmos aqui, correu tudo bem -> commit
+                // Commit da transação
                 transaction.Commit();
+
+                // ✅ ENVIAR PARA RABBITMQ APÓS COMMIT
+                var mensagem = new ApostaBackgroundMessage
+                {
+                    ApostaId = novaApostaId,
+                    JogoId = jogoId,
+                    TipoAposta = tipoAposta,
+                    Montante = request.Montante,
+                    OddMomento = request.Odd_Momento,
+                    Estado = 1, // Pendente
+                    DataHoraRegisto = DateTime.Now
+                };
+
+                var producer = new ApostasBackgroundProducer();
+                producer.EnviarAposta(mensagem);
 
                 return CreatedAtAction(nameof(ObterApostaPorId),
                     new { id = novaApostaId },
@@ -81,7 +105,6 @@ namespace BetStrike.Bets.Api.Controllers
             }
             catch (SqlException ex)
             {
-                // Se falhar ou a SP de Pagamentos lançar 'Saldo insuficiente', fazemos rollback
                 transaction.Rollback();
                 return BadRequest(ex.Message);
             }

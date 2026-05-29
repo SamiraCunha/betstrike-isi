@@ -21,6 +21,8 @@ builder.Services.AddHttpClient("ResultadosApi", client =>
     client.BaseAddress = new Uri(builder.Configuration["ApiUrls:Resultados"]);
 });
 
+builder.Services.AddScoped<EstatisticasRepository>();
+
 // se o teu DbConnectionFactory receber IConfiguration no construtor,
 // o ASP.NET Core passa o builder.Configuration automaticamente.
 
