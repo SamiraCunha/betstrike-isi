@@ -57,5 +57,11 @@ namespace BetStrike.Bets.Api.Data
 
             return await connection.QueryFirstOrDefaultAsync<EstatisticasJogo>(sql, new { JogoId = jogoId });
         }
+        public async Task<IEnumerable<EstatisticasJogo>> ObterTodas()
+        {
+            using var connection = _dbFactory.CreateConnection();
+            var sql = "SELECT * FROM EstatisticasJogo";
+            return await connection.QueryAsync<EstatisticasJogo>(sql);
+        }
     }
 }

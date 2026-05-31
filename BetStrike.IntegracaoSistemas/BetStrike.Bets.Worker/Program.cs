@@ -3,6 +3,7 @@ using System.Text.Json;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Microsoft.Data.SqlClient;
+using BetStrike.Bets.Api.Models;
 using Dapper;
 
 Console.WriteLine("[Worker] Iniciando worker de estatísticas...");
@@ -81,6 +82,30 @@ async Task AtualizarEstatisticas(ApostaBackgroundMessage mensagem)
     });
     
     Console.WriteLine($"[Worker] Estatísticas atualizadas para jogo {mensagem.JogoId}");
+
+        // --- ALERTA AUTOMÁTICO EM LOG ---
+
+    // Ler estatísticas atualizadas
+    var estatistica = await dbConnection.QuerySingleOrDefaultAsync<EstatisticasJogo>(
+        "SELECT * FROM EstatisticasJogo WHERE JogoId = @JogoId",
+        new { JogoId = mensagem.JogoId });
+
+    if (estatistica != null)
+    {
+        const decimal LIMIAR_EXPOSICAO = 100m;
+        const int LIMIAR_NUMERO_APOSTAS = 10;
+
+        bool exposicaoAlta = estatistica.Total_Apostado > LIMIAR_EXPOSICAO;
+        bool muitasApostas = estatistica.Numero_Apostas > LIMIAR_NUMERO_APOSTAS;
+
+        if (exposicaoAlta || muitasApostas)
+        {
+            Console.WriteLine(
+                $"[ALERTA] Exposição elevada no jogo {estatistica.JogoId} " +
+                $"- Total apostado: {estatistica.Total_Apostado} " +
+                $"- Nº apostas: {estatistica.Numero_Apostas}");
+        }
+    }
 }
 
 public class ApostaBackgroundMessage

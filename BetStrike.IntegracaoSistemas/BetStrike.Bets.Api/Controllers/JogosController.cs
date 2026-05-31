@@ -13,11 +13,13 @@ namespace BetStrike.Bets.Api.Controllers
     {
         private readonly DbConnectionFactory _connectionFactory;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly KafkaProducer _kafkaProducer;
 
-        public JogosController(DbConnectionFactory connectionFactory, IHttpClientFactory httpClientFactory)
+        public JogosController(DbConnectionFactory connectionFactory, IHttpClientFactory httpClientFactory, KafkaProducer kafkaProducer)
         {
             _connectionFactory = connectionFactory;
             _httpClientFactory = httpClientFactory;
+            _kafkaProducer = kafkaProducer;
         }
 
         // POST api/jogos/sincronizar-resultado/{codigoJogo}
@@ -92,6 +94,31 @@ namespace BetStrike.Bets.Api.Controllers
 
                 transaction.Commit();
 
+                // 7) PUBLICAR EVENTO DE STREAMING NO KAFKA
+                try
+                {
+                    var evento = new JogoFinalizadoEvent
+                    {
+                        // Se quiseres, podes ir buscar o Id interno com uma SP extra;
+                        // se não for necessário no consumidor, deixa JogoId = 0.
+                        JogoId = 0,
+                        Codigo_Jogo = codigoJogo,
+                        GolosCasa = jogoResultados.Golos_Casa,
+                        GolosFora = jogoResultados.Golos_Fora,
+                        DataHoraFinalizacao = DateTime.UtcNow,
+                        Estado = jogoResultados.Estado
+                    };
+
+                    await _kafkaProducer.PublicarJogoFinalizadoAsync(evento);
+                }
+                catch (Exception ex)
+                {
+                    // Não falhar a operação principal por causa do streaming;
+                    // apenas regista o erro e segue.
+                    Console.WriteLine($"[Kafka] Erro ao publicar evento de jogo finalizado: {ex.Message}");
+                }
+
+
                 return Ok(new
                 {
                     Codigo_Jogo = codigoJogo,
@@ -117,6 +144,8 @@ namespace BetStrike.Bets.Api.Controllers
                 transaction.Rollback();
                 return StatusCode(500, "Erro interno ao sincronizar resultado e resolver apostas.");
             }
+
+
         }
 
         // POST api/jogos

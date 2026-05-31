@@ -14,4 +14,8 @@
     <PackageReference Include="System.Text.Json" Version="10.0.8" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\BetStrike.Bets.Api\BetStrike.Bets.Api.csproj" />
+  </ItemGroup>
+
 </Project>

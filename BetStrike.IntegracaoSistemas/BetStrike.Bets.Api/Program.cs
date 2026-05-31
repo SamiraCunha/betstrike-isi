@@ -22,6 +22,7 @@ builder.Services.AddHttpClient("ResultadosApi", client =>
 });
 
 builder.Services.AddScoped<EstatisticasRepository>();
+builder.Services.AddSingleton<KafkaProducer, KafkaProducer>();
 
 // se o teu DbConnectionFactory receber IConfiguration no construtor,
 // o ASP.NET Core passa o builder.Configuration automaticamente.
